@@ -1,0 +1,97 @@
+pipeline {
+    agent any
+    
+    environment {
+        SONAR_SERVER = 'SonarQube' // Update with your SonarQube server configuration name
+        OWASP_REPORT = "${env.WORKSPACE}/dependency-check-report.html"
+    }
+    
+    triggers {
+        // Trigger pipeline on every commit to main branch
+        pollSCM('H/5 * * * *')
+    }
+    
+    stages {
+        stage('Checkout Code') {
+            steps {
+                git branch: 'main', url: 'https://github.com/tellvinodpandey/assignmenttest.git'
+            }
+        }
+        
+        stage('Build') {
+            steps {
+                sh './mvnw clean install'
+            }
+        }
+        
+        stage('Code Quality Analysis') {
+            steps {
+                script {
+                    withSonarQubeEnv('SonarQube') {
+                        sh './mvnw sonar:sonar'
+                    }
+                }
+            }
+        }
+        
+        stage('Quality Gate') {
+            steps {
+                script {
+                    timeout(time: 5, unit: 'MINUTES') {
+                        waitForQualityGate abortPipeline: true
+                    }
+                }
+            }
+        }
+        
+        stage('Code Coverage') {
+            steps {
+                script {
+                    // Publish JaCoCo report
+                    publishCoverage adapters: [jacocoAdapter('target/site/jacoco/jacoco.xml')],
+                                    sourceFileResolver: sourceFiles('STORE_ALL_BUILD')
+                }
+            }
+        }
+        
+        stage('Cyclomatic Complexity') {
+            steps {
+                sh '''
+                # Install Lizard if not available
+                if ! command -v lizard &> /dev/null; then
+                    pip install lizard
+                fi
+                lizard . > cyclomatic_complexity.txt
+                '''
+                archiveArtifacts artifacts: 'cyclomatic_complexity.txt'
+            }
+        }
+        
+        stage('Security Vulnerability Scan') {
+            steps {
+                sh '''
+                dependency-check.sh --project my-app --out .
+                '''
+                archiveArtifacts artifacts: 'dependency-check-report.html'
+            }
+        }
+    }
+    
+    post {
+        always {
+            // Archive reports and logs
+            archiveArtifacts artifacts: '**/jacoco.xml, cyclomatic_complexity.txt, dependency-check-report.html'
+        }
+        success {
+            emailext subject: "Build Success: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+                     body: "The build was successful.\n\nBuild Details: ${env.BUILD_URL}",
+                     recipientProviders: [requestor()]
+        }
+        failure {
+            emailext subject: "Build Failed: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+                     body: "The build failed.\n\nCheck the build logs for more details: ${env.BUILD_URL}",
+                     recipientProviders: [requestor()]
+        }
+    }
+}
+
