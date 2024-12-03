@@ -1,0 +1,87 @@
+
+pipeline {
+    agent any
+	
+	tools{
+		maven '3.6.3'
+	}
+
+    stages {
+        stage('Checkout'){
+           steps {
+                git credentialsId: 'bsdkjsdhkjfsdfjdjfkdjsjfkdjfjdkfjsdkfkdskfkfjk', 
+                url: 'https://github.com/tellvinodpandey/assignmenttest.git',
+                branch: 'main'
+           }
+        }
+
+        stage('Build') {
+            steps {
+                script{
+				sh """
+					echo "maven clean"
+					mvn clean
+					echo "maven install"
+					mvn -Dmaven.test.skip.install
+				"""
+            }
+        }
+
+        stage('SonarQube Analysis') {
+            steps {
+                withSonarQubeEnv('sonarQubeServerUrl': 'url') {
+                    sh 'sonar-scanner -Dsonar.login=your-sonarqube-token'
+                }
+            }
+        }
+
+        stage('Code Coverage') {
+            steps {
+                sh 'mvn clean package jacoco:report'
+            }
+        }
+		
+		stage('OWASP Dependency Check') {
+            steps {
+                dependencyCheck args: '--scan target/', odcInstallation: 'owasp'
+            }
+        }
+		
+		stage('Publish OWASP Dependency Check Report') {
+            steps {
+                publishHTML(target: [
+                    allowMissing: false,
+                    alwaysLinkToLastBuild: true,
+                    keepAll: true,
+                    reportDir: 'target',
+                    reportFiles: 'report.html',
+                    reportName: 'OWASP Dependency Check Report'
+                ])
+            }
+        }
+
+        stage('Cyclomatic Complexity Analysis') {
+            steps {
+                sh 'lizard . --format json > complexity_report.json'
+            }
+        }
+    }
+
+    post {
+        always {
+			script{
+			 if(build == 'FAILURE'){
+			 echo 'BUILD FAILLED !!!!!!' 
+			 emailext body:"Build $BUILD_NUMBER_FAILED. Check console output at $BUILDURL"
+			 subject: '$PROJECT_NAME - $BUILD_NUMBER_FAILED'
+			 to: 'abcD@gmail.com'
+			}
+			else if(build == 'SUCCESS'){
+			 echo 'BUILD SUCCESS !!!!!!' 
+			 emailext body:"Build $BUILD_NUMBER_SUCCESS. Check console output at $BUILDURL"
+			 subject: '$PROJECT_NAME - $BUILD_NUMBER_SUCCESS'
+			 to: 'abcD@gmail.com'
+			}
+        
+    }
+}
